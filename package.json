@@ -1,0 +1,21 @@
+{
+  "name": "netrue-health",
+  "private": true,
+  "workspaces": ["apps/*", "packages/*"],
+  "packageManager": "pnpm@9.15.5",
+  "scripts": {
+    "dev": "concurrently -n api,web -c blue,green \"pnpm --filter @netrue/api dev\" \"pnpm --filter @netrue/web dev\"",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "test:e2e": "playwright test",
+    "lint": "pnpm -r lint",
+    "seed": "pnpm --filter @netrue/api seed",
+    "start": "pnpm --filter @netrue/api start"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.55.1",
+    "concurrently": "9.2.1",
+    "typescript": "5.9.2"
+  }
+}

@@ -1,0 +1,3 @@
+# FHIR R4 export mapping
+
+The export endpoint labels its FHIR element as partial and does not claim certification. Planned mappings: Patient→Patient, lab/vitals→Observation, report→DiagnosticReport and DocumentReference, medication use→MedicationStatement, conditions/allergies→Condition/AllergyIntolerance, vaccines/visits/procedures/family history→Immunization/Encounter/Procedure/FamilyMemberHistory, providers/facilities→Practitioner/PractitionerRole/Organization, and source/audit→Provenance/AuditEvent. Unknown terminology remains uncoded. Consent profiles require a later implementation decision.

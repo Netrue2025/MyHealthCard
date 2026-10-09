@@ -1,0 +1,2 @@
+import{defineConfig,devices}from"@playwright/test";
+export default defineConfig({testDir:"./tests/e2e",use:{baseURL:"http://localhost:5173",trace:"retain-on-failure"},projects:[{name:"mobile",use:{...devices["Mobile Chrome"],viewport:{width:360,height:800}}},{name:"desktop",use:{...devices["Desktop Chrome"]}}],webServer:{command:"pnpm dev",url:"http://localhost:5173",reuseExistingServer:true,timeout:120000}});

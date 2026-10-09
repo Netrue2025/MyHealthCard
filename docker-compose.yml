@@ -1,0 +1,31 @@
+services:
+  mongo:
+    image: mongo:7
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    ports: ["27017:27017"]
+    volumes: ["mongo-data:/data/db"]
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+  mongo-init:
+    image: mongo:7
+    depends_on: { mongo: { condition: service_healthy } }
+    restart: "no"
+    command: ["mongosh", "--host", "mongo:27017", "--eval", "try { rs.status() } catch (e) { rs.initiate({_id:'rs0',members:[{_id:0,host:'mongo:27017'}]}) }"]
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address :9001
+    environment: { MINIO_ROOT_USER: local-development-only, MINIO_ROOT_PASSWORD: local-development-only }
+    ports: ["9000:9000", "9001:9001"]
+    volumes: ["minio-data:/data"]
+  clamav:
+    image: clamav/clamav:stable
+    ports: ["3310:3310"]
+volumes:
+  mongo-data:
+  minio-data:
