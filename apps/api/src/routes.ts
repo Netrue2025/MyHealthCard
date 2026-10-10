@@ -315,7 +315,8 @@ export async function routes(app: FastifyInstance) {
     if (!u) return;
     const d = await db();
     const patientId = new ObjectId(u.patientId);
-    const [records, grants, history, notifications] = await Promise.all([
+    const today = new Date().toISOString().slice(0, 10);
+    const [records, grants, history, notifications, medications, takenToday, latestTest] = await Promise.all([
       d
         .collection("records")
         .countDocuments({ patientId, status: { $ne: "deleted" } }),
@@ -331,10 +332,14 @@ export async function routes(app: FastifyInstance) {
         .sort({ createdAt: -1 })
         .limit(5)
         .toArray(),
+      d.collection("medication_schedules").countDocuments({ patientId, active: true }),
+      d.collection("medication_logs").countDocuments({ patientId, scheduledDate: today, status: "taken" }),
+      d.collection("daily_tests").findOne({ patientId }, { sort: { measuredAt: -1 } }),
     ]);
     return {
       counts: { records, activeShares: grants, history },
       notifications: notifications.map(shape),
+      dailyCare: { medications, takenToday, latestTest: shape(latestTest) },
     };
   });
   app.get("/v1/records", async (req, rep) => {
@@ -712,6 +717,22 @@ export async function routes(app: FastifyInstance) {
         await d.collection("daily_tests").findOne({ _id: result.insertedId }),
       ),
     });
+  });
+  app.patch("/v1/daily-tests/:id", async (req, rep) => {
+    const u = await owner(req, rep);
+    if (!u || !assertCsrf(req, rep)) return;
+    const id = oid((req.params as any).id);
+    const input = dailyTestSchema.safeParse(req.body);
+    if (!id || !input.success)
+      return fail(rep, req, 400, "VALIDATION_ERROR", "Check the test result.");
+    const d = await db();
+    const result = await d.collection("daily_tests").updateOne(
+      { _id: id, patientId: new ObjectId(u.patientId) },
+      { $set: { ...input.data, measuredAt: new Date(input.data.measuredAt), updatedAt: new Date() } },
+    );
+    if (!result.matchedCount)
+      return fail(rep, req, 404, "NOT_FOUND", "Test result not found.");
+    return { item: shape(await d.collection("daily_tests").findOne({ _id: id })) };
   });
   app.delete("/v1/daily-tests/:id", async (req, rep) => {
     const u = await owner(req, rep);

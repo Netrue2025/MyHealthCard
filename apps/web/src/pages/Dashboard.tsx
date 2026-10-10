@@ -1,14 +1,236 @@
 import { useQuery } from "@tanstack/react-query";
-import { ArrowUpRight, Bell, Building2, FilePlus2, FileText, HeartPulse, Share2, ShieldCheck } from "lucide-react";
+import {
+  ArrowUpRight,
+  Bell,
+  Building2,
+  CheckCircle2,
+  FilePlus2,
+  FileText,
+  FlaskConical,
+  HeartPulse,
+  Pill,
+  Share2,
+  ShieldCheck,
+} from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { ErrorState, Loading, Status, fmtDate } from "../components";
 import type { Me } from "../App";
 
-function ActivityChart({value}:{value:number}) {const bars=[35,52,43,68,58,82];return <div className="mini-chart" aria-label={`${value} records stored`}><div className="chart-head"><span>Records</span><strong>{value}</strong></div><svg viewBox="0 0 240 72" role="img" aria-hidden="true"><defs><linearGradient id="chartFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#59d28f" stopOpacity=".42"/><stop offset="1" stopColor="#59d28f" stopOpacity="0"/></linearGradient></defs><path d="M0 58 C22 54 25 39 48 42 S76 55 96 39 S124 21 144 31 S171 48 192 24 S221 14 240 8 L240 72 L0 72Z" fill="url(#chartFill)"/><path d="M0 58 C22 54 25 39 48 42 S76 55 96 39 S124 21 144 31 S171 48 192 24 S221 14 240 8" fill="none" stroke="#36bd78" strokeWidth="4" strokeLinecap="round"/></svg><div className="chart-bars">{bars.map((bar,i)=><i key={i} style={{height:`${bar}%`}}/>)}</div></div>}
+function ActivityChart({ value }: { value: number }) {
+  const bars = [35, 52, 43, 68, 58, 82];
+  return (
+    <div className="mini-chart" aria-label={`${value} records stored`}>
+      <div className="chart-head">
+        <span>Records</span>
+        <strong>{value}</strong>
+      </div>
+      <svg viewBox="0 0 240 72" role="img" aria-hidden="true">
+        <defs>
+          <linearGradient id="chartFill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor="#59d28f" stopOpacity=".42" />
+            <stop offset="1" stopColor="#59d28f" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        <path
+          d="M0 58 C22 54 25 39 48 42 S76 55 96 39 S124 21 144 31 S171 48 192 24 S221 14 240 8 L240 72 L0 72Z"
+          fill="url(#chartFill)"
+        />
+        <path
+          d="M0 58 C22 54 25 39 48 42 S76 55 96 39 S124 21 144 31 S171 48 192 24 S221 14 240 8"
+          fill="none"
+          stroke="#36bd78"
+          strokeWidth="4"
+          strokeLinecap="round"
+        />
+      </svg>
+      <div className="chart-bars">
+        {bars.map((bar, i) => (
+          <i key={i} style={{ height: `${bar}%` }} />
+        ))}
+      </div>
+    </div>
+  );
+}
 
-export default function Dashboard({me}:{me:Me}) {
-  const nav=useNavigate();const dash=useQuery({queryKey:["dashboard"],queryFn:()=>api<any>("/v1/dashboard")});const records=useQuery({queryKey:["records","recent"],queryFn:()=>api<any>("/v1/records?limit=3")});
-  if(dash.isLoading)return <Loading/>;if(dash.error)return <ErrorState message={(dash.error as Error).message} retry={()=>dash.refetch()}/>;
-  return <div className="page dashboard"><section className="mobile-greeting"><div><span>Hello,</span><h1>{me.user.fullName.split(" ")[0]}</h1></div><span className="pulse-orb"><HeartPulse/></span></section><section className="welcome"><div><span className="eyebrow">My health</span><h1>Your records, one tap away.</h1><p>Private. Organised. Yours.</p></div><ActivityChart value={dash.data.counts.records}/></section><section className="mobile-actions" aria-label="Quick actions"><button onClick={()=>nav("/records?new=1")}><span><FilePlus2/></span><strong>Add</strong></button><button onClick={()=>nav("/sharing?new=1")}><span><Share2/></span><strong>Share</strong></button><button onClick={()=>nav("/facilities")}><span><Building2/></span><strong>Find care</strong></button><button onClick={()=>nav("/records")}><span><FileText/></span><strong>Records</strong></button></section><section className="metric-grid"><article><div className="metric-icon green"><FileText/></div><div><strong>{dash.data.counts.records}</strong><span>Records</span></div></article><article><div className="metric-icon navy"><Share2/></div><div><strong>{dash.data.counts.activeShares}</strong><span>Shares</span></div></article><article><div className="metric-icon amber"><HeartPulse/></div><div><strong>{dash.data.counts.history}</strong><span>History</span></div></article></section><div className="dashboard-grid"><section className="panel"><header><div><span className="eyebrow">Latest</span><h2>Recent records</h2></div><button className="text-button" onClick={()=>nav("/records")}>All <ArrowUpRight/></button></header><div className="record-list">{records.isLoading?<Loading/>:records.data?.items.map((r:any)=><button className="record-row" key={r.id} onClick={()=>nav(`/records/${r.id}`)}><span className="file-icon"><FileText/></span><span className="record-main"><strong>{r.title}</strong><small>{fmtDate(r.reportDate)}</small></span><Status kind="green" label="Ready"/></button>)}</div></section><section className="panel desktop-actions"><header><div><span className="eyebrow">Shortcuts</span><h2>Quick actions</h2></div></header>{[[FilePlus2,"Add record","/records?new=1"],[ShieldCheck,"Share record","/sharing?new=1"],[Building2,"Find care","/facilities"]].map(([Icon,label,to]:any)=><button key={label} onClick={()=>nav(to)}><span><Icon/></span><div><strong>{label}</strong></div><ArrowUpRight/></button>)}</section></div>{dash.data.notifications.length>0&&<section className="inbox"><header><Bell/><div><strong>Updates</strong></div></header>{dash.data.notifications.map((n:any)=><article key={n.id}><strong>{n.title}</strong><span>{n.message}</span></article>)}</section>}</div>
+export default function Dashboard({ me }: { me: Me }) {
+  const nav = useNavigate();
+  const dash = useQuery({
+    queryKey: ["dashboard"],
+    queryFn: () => api<any>("/v1/dashboard"),
+  });
+  const records = useQuery({
+    queryKey: ["records", "recent"],
+    queryFn: () => api<any>("/v1/records?limit=3"),
+  });
+  if (dash.isLoading) return <Loading />;
+  if (dash.error)
+    return (
+      <ErrorState
+        message={(dash.error as Error).message}
+        retry={() => dash.refetch()}
+      />
+    );
+  return (
+    <div className="page dashboard">
+      <section className="mobile-greeting">
+        <div>
+          <span>Hello,</span>
+          <h1>{me.user.fullName.split(" ")[0]}</h1>
+        </div>
+        <span className="pulse-orb">
+          <HeartPulse />
+        </span>
+      </section>
+      <section className="welcome">
+        <div>
+          <span className="eyebrow">My health</span>
+          <h1>Your records, one tap away.</h1>
+          <p>Private. Organised. Yours.</p>
+        </div>
+        <ActivityChart value={dash.data.counts.records} />
+      </section>
+      <section className="mobile-actions" aria-label="Quick actions">
+        <button onClick={() => nav("/records?new=1")}>
+          <span>
+            <FilePlus2 />
+          </span>
+          <strong>Add</strong>
+        </button>
+        <button onClick={() => nav("/sharing?new=1")}>
+          <span>
+            <Share2 />
+          </span>
+          <strong>Share</strong>
+        </button>
+        <button onClick={() => nav("/facilities")}>
+          <span>
+            <Building2 />
+          </span>
+          <strong>Find care</strong>
+        </button>
+        <button onClick={() => nav("/records")}>
+          <span>
+            <FileText />
+          </span>
+          <strong>Records</strong>
+        </button>
+      </section>
+      <section className="metric-grid">
+        <article>
+          <div className="metric-icon green">
+            <FileText />
+          </div>
+          <div>
+            <strong>{dash.data.counts.records}</strong>
+            <span>Records</span>
+          </div>
+        </article>
+        <article>
+          <div className="metric-icon navy">
+            <Share2 />
+          </div>
+          <div>
+            <strong>{dash.data.counts.activeShares}</strong>
+            <span>Shares</span>
+          </div>
+        </article>
+        <article>
+          <div className="metric-icon amber">
+            <HeartPulse />
+          </div>
+          <div>
+            <strong>{dash.data.counts.history}</strong>
+            <span>History</span>
+          </div>
+        </article>
+      </section>
+      <button className="home-care-card" onClick={() => nav("/daily-care")}>
+        <div className="home-care-heading">
+          <span className="care-heart"><HeartPulse /></span>
+          <div><span>Daily care</span><strong>Today at a glance</strong></div>
+          <ArrowUpRight />
+        </div>
+        <div className="home-care-stats">
+          <span><Pill /><b>{dash.data.dailyCare.medications}</b><small>Medicines</small></span>
+          <span><CheckCircle2 /><b>{dash.data.dailyCare.takenToday}</b><small>Taken today</small></span>
+          <span><FlaskConical /><b>{dash.data.dailyCare.latestTest?.value ?? "—"}</b><small>{dash.data.dailyCare.latestTest?.testType?.replaceAll("_", " ") ?? "Latest test"}</small></span>
+        </div>
+      </button>
+      <div className="dashboard-grid">
+        <section className="panel">
+          <header>
+            <div>
+              <span className="eyebrow">Latest</span>
+              <h2>Recent records</h2>
+            </div>
+            <button className="text-button" onClick={() => nav("/records")}>
+              All <ArrowUpRight />
+            </button>
+          </header>
+          <div className="record-list">
+            {records.isLoading ? (
+              <Loading />
+            ) : (
+              records.data?.items.map((r: any) => (
+                <button
+                  className="record-row"
+                  key={r.id}
+                  onClick={() => nav(`/records/${r.id}`)}
+                >
+                  <span className="file-icon">
+                    <FileText />
+                  </span>
+                  <span className="record-main">
+                    <strong>{r.title}</strong>
+                    <small>{fmtDate(r.reportDate)}</small>
+                  </span>
+                  <Status kind="green" label="Ready" />
+                </button>
+              ))
+            )}
+          </div>
+        </section>
+        <section className="panel desktop-actions">
+          <header>
+            <div>
+              <span className="eyebrow">Shortcuts</span>
+              <h2>Quick actions</h2>
+            </div>
+          </header>
+          {[
+            [FilePlus2, "Add record", "/records?new=1"],
+            [ShieldCheck, "Share record", "/sharing?new=1"],
+            [Building2, "Find care", "/facilities"],
+          ].map(([Icon, label, to]: any) => (
+            <button key={label} onClick={() => nav(to)}>
+              <span>
+                <Icon />
+              </span>
+              <div>
+                <strong>{label}</strong>
+              </div>
+              <ArrowUpRight />
+            </button>
+          ))}
+        </section>
+      </div>
+      {dash.data.notifications.length > 0 && (
+        <section className="inbox">
+          <header>
+            <Bell />
+            <div>
+              <strong>Updates</strong>
+            </div>
+          </header>
+          {dash.data.notifications.map((n: any) => (
+            <article key={n.id}>
+              <strong>{n.title}</strong>
+              <span>{n.message}</span>
+            </article>
+          ))}
+        </section>
+      )}
+    </div>
+  );
 }

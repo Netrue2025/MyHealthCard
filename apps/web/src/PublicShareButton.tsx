@@ -1,2 +1,135 @@
-import{useState,type FormEvent}from"react";import{Check,Copy,Share2}from"lucide-react";import{send}from"./api";import{Button,Field,Modal,SelectField}from"./components";
-export default function PublicShareButton({kind,recordId}:{kind:"record"|"daily_logs";recordId?:string}){const[open,setOpen]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState(""),[url,setUrl]=useState("");async function submit(e:FormEvent<HTMLFormElement>){e.preventDefault();setBusy(true);setError("");const data=new FormData(e.currentTarget);try{const result=await send("POST","/v1/public-shares",kind==="record"?{kind,recordId,durationHours:Number(data.get("durationHours"))}:{kind,dateFrom:data.get("dateFrom"),dateTo:data.get("dateTo"),durationHours:Number(data.get("durationHours"))});setUrl(result.url)}catch(err:any){setError(err.message)}finally{setBusy(false)}}async function copy(){await navigator.clipboard.writeText(url)}const today=new Date().toISOString().slice(0,10);const weekAgo=new Date(Date.now()-6*86400000).toISOString().slice(0,10);return <><Button variant="secondary" onClick={()=>{setOpen(true);setUrl("")}}><Share2/> Share</Button>{open&&<Modal title={kind==="record"?"Share this result":"Share daily health report"} onClose={()=>setOpen(false)}>{url?<div className="share-link-ready"><Check/><h3>Private link ready</h3><p>Anyone with this link can view the selected information until it expires.</p><div><input value={url} readOnly/><Button onClick={copy}><Copy/> Copy</Button></div></div>:<form className="modal-form" onSubmit={submit}>{kind==="daily_logs"&&<div className="date-pair"><Field label="From" name="dateFrom" type="date" defaultValue={weekAgo} required/><Field label="To" name="dateTo" type="date" defaultValue={today} required/></div>}<SelectField label="Link expires" name="durationHours" defaultValue="24"><option value="1">In 1 hour</option><option value="24">In 24 hours</option><option value="168">In 7 days</option></SelectField><p className="share-warning">The recipient does not need an account. Only send this link to someone you trust.</p>{error&&<p className="form-error">{error}</p>}<div className="modal-actions"><Button type="button" variant="secondary" onClick={()=>setOpen(false)}>Cancel</Button><Button disabled={busy}>{busy?"Creating…":"Create private link"}</Button></div></form>}</Modal>}</>}
+import { useState, type FormEvent } from "react";
+import { Check, Copy, Share2 } from "lucide-react";
+import { send } from "./api";
+import { Button, Field, Modal, SelectField } from "./components";
+export default function PublicShareButton({
+  kind,
+  recordId,
+}: {
+  kind: "record" | "daily_logs";
+  recordId?: string;
+}) {
+  const [open, setOpen] = useState(false),
+    [busy, setBusy] = useState(false),
+    [error, setError] = useState(""),
+    [url, setUrl] = useState("");
+  async function submit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    const data = new FormData(e.currentTarget);
+    try {
+      const result = await send(
+        "POST",
+        "/v1/public-shares",
+        kind === "record"
+          ? { kind, recordId, durationHours: Number(data.get("durationHours")) }
+          : {
+              kind,
+              dateFrom: data.get("dateFrom"),
+              dateTo: data.get("dateTo"),
+              durationHours: Number(data.get("durationHours")),
+            },
+      );
+      setUrl(result.url);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function copy() {
+    await navigator.clipboard.writeText(url);
+  }
+  const today = new Date().toISOString().slice(0, 10);
+  const weekAgo = new Date(Date.now() - 6 * 86400000)
+    .toISOString()
+    .slice(0, 10);
+  return (
+    <>
+      <Button
+        variant="secondary"
+        onClick={() => {
+          setOpen(true);
+          setUrl("");
+        }}
+      >
+        <Share2 /> Share
+      </Button>
+      {open && (
+        <Modal
+          title={
+            kind === "record"
+              ? "Share this result"
+              : "Share daily health report"
+          }
+          onClose={() => setOpen(false)}
+        >
+          {url ? (
+            <div className="share-link-ready">
+              <Check />
+              <h3>Private link ready</h3>
+              <p>
+                Anyone with this link can view the selected information until it
+                expires.
+              </p>
+              <div>
+                <input value={url} readOnly />
+                <Button onClick={copy}>
+                  <Copy /> Copy
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <form className="modal-form" onSubmit={submit}>
+              {kind === "daily_logs" && (
+                <div className="date-pair">
+                  <Field
+                    label="From"
+                    name="dateFrom"
+                    type="date"
+                    defaultValue={weekAgo}
+                    required
+                  />
+                  <Field
+                    label="To"
+                    name="dateTo"
+                    type="date"
+                    defaultValue={today}
+                    required
+                  />
+                </div>
+              )}
+              <SelectField
+                label="Link expires"
+                name="durationHours"
+                defaultValue="24"
+              >
+                <option value="1">In 1 hour</option>
+                <option value="24">In 24 hours</option>
+                <option value="168">In 7 days</option>
+              </SelectField>
+              <p className="share-warning">
+                The recipient does not need an account. Only send this link to
+                someone you trust.
+              </p>
+              {error && <p className="form-error">{error}</p>}
+              <div className="modal-actions">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => setOpen(false)}
+                >
+                  Cancel
+                </Button>
+                <Button disabled={busy}>
+                  {busy ? "Creating…" : "Create private link"}
+                </Button>
+              </div>
+            </form>
+          )}
+        </Modal>
+      )}
+    </>
+  );
+}

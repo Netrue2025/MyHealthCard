@@ -6,6 +6,7 @@ import {
   Check,
   Clock3,
   FlaskConical,
+  Pencil,
   Pill,
   Plus,
   Trash2,
@@ -33,6 +34,8 @@ export default function DailyCare() {
   const qc = useQueryClient();
   const [medModal, setMedModal] = useState(false),
     [testModal, setTestModal] = useState(false),
+    [selectedTest, setSelectedTest] = useState<any>(null),
+    [editingTest, setEditingTest] = useState<any>(null),
     [notice, setNotice] = useState("");
   const meds = useQuery({
     queryKey: ["medications"],
@@ -67,6 +70,23 @@ export default function DailyCare() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["daily-tests"] });
       setTestModal(false);
+    },
+  });
+  const updateTest = useMutation({
+    mutationFn: ({ id, body }: { id: string; body: any }) =>
+      send("PATCH", `/v1/daily-tests/${id}`, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["daily-tests"] });
+      setTestModal(false);
+      setEditingTest(null);
+      setSelectedTest(null);
+    },
+  });
+  const deleteTest = useMutation({
+    mutationFn: (id: string) => send("DELETE", `/v1/daily-tests/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["daily-tests"] });
+      setSelectedTest(null);
     },
   });
   async function enablePush() {
@@ -116,7 +136,12 @@ export default function DailyCare() {
   function submitTest(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const data = Object.fromEntries(new FormData(e.currentTarget));
-    addTest.mutate({ ...data, measuredAt: new Date().toISOString() });
+    const body = {
+      ...data,
+      measuredAt: editingTest?.measuredAt ?? new Date().toISOString(),
+    };
+    if (editingTest) updateTest.mutate({ id: editingTest.id, body });
+    else addTest.mutate(body);
   }
   const taken = (id: string, time: string) =>
     meds.data?.logs?.some(
@@ -207,7 +232,12 @@ export default function DailyCare() {
               <span className="eyebrow">Daily tests</span>
               <h2>Recent readings</h2>
             </div>
-            <Button onClick={() => setTestModal(true)}>
+            <Button
+              onClick={() => {
+                setEditingTest(null);
+                setTestModal(true);
+              }}
+            >
               <Plus /> Add
             </Button>
           </header>
@@ -224,7 +254,11 @@ export default function DailyCare() {
           ) : (
             <div className="test-list">
               {tests.data.items.map((t: any) => (
-                <article key={t.id}>
+                <button
+                  className="test-entry"
+                  key={t.id}
+                  onClick={() => setSelectedTest(t)}
+                >
                   <span>
                     <FlaskConical />
                   </span>
@@ -235,7 +269,7 @@ export default function DailyCare() {
                   <b>
                     {t.value} {t.unit}
                   </b>
-                </article>
+                </button>
               ))}
             </div>
           )}
@@ -282,10 +316,66 @@ export default function DailyCare() {
           </form>
         </Modal>
       )}
+      {selectedTest && (
+        <Modal title="Test details" onClose={() => setSelectedTest(null)}>
+          <div className="test-detail-modal">
+            <span className="test-detail-icon">
+              <FlaskConical />
+            </span>
+            <span className="eyebrow">
+              {selectedTest.testType.replaceAll("_", " ")}
+            </span>
+            <strong className="test-detail-value">
+              {selectedTest.value} {selectedTest.unit}
+            </strong>
+            <dl>
+              <div>
+                <dt>Recorded</dt>
+                <dd>{fmtDate(selectedTest.measuredAt)}</dd>
+              </div>
+              <div>
+                <dt>Note</dt>
+                <dd>{selectedTest.notes || "No note added"}</dd>
+              </div>
+            </dl>
+            <div className="modal-actions test-detail-actions">
+              <Button
+                variant="danger"
+                disabled={deleteTest.isPending}
+                onClick={() =>
+                  confirm("Delete this daily test record?") &&
+                  deleteTest.mutate(selectedTest.id)
+                }
+              >
+                <Trash2 /> Delete
+              </Button>
+              <Button
+                onClick={() => {
+                  setEditingTest(selectedTest);
+                  setSelectedTest(null);
+                  setTestModal(true);
+                }}
+              >
+                <Pencil /> Edit
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
       {testModal && (
-        <Modal title="Add daily reading" onClose={() => setTestModal(false)}>
+        <Modal
+          title={editingTest ? "Edit daily reading" : "Add daily reading"}
+          onClose={() => {
+            setTestModal(false);
+            setEditingTest(null);
+          }}
+        >
           <form className="modal-form" onSubmit={submitTest}>
-            <SelectField label="Test" name="testType">
+            <SelectField
+              label="Test"
+              name="testType"
+              defaultValue={editingTest?.testType}
+            >
               <option value="blood_pressure">Blood pressure</option>
               <option value="blood_sugar">Blood sugar</option>
               <option value="temperature">Temperature</option>
@@ -297,22 +387,40 @@ export default function DailyCare() {
               label="Result"
               name="value"
               placeholder="e.g. 120/80"
+              defaultValue={editingTest?.value}
               required
             />
-            <Field label="Unit" name="unit" placeholder="e.g. mmHg" />
-            <Field label="Notes" name="notes" placeholder="Optional note" />
-            {addTest.error && (
-              <p className="form-error">{(addTest.error as Error).message}</p>
+            <Field
+              label="Unit"
+              name="unit"
+              placeholder="e.g. mmHg"
+              defaultValue={editingTest?.unit}
+            />
+            <Field
+              label="Notes"
+              name="notes"
+              placeholder="Optional note"
+              defaultValue={editingTest?.notes}
+            />
+            {(addTest.error || updateTest.error) && (
+              <p className="form-error">
+                {((addTest.error || updateTest.error) as Error).message}
+              </p>
             )}
             <div className="modal-actions">
               <Button
                 type="button"
                 variant="secondary"
-                onClick={() => setTestModal(false)}
+                onClick={() => {
+                  setTestModal(false);
+                  setEditingTest(null);
+                }}
               >
                 Cancel
               </Button>
-              <Button disabled={addTest.isPending}>Save reading</Button>
+              <Button disabled={addTest.isPending || updateTest.isPending}>
+                {editingTest ? "Save changes" : "Save reading"}
+              </Button>
             </div>
           </form>
         </Modal>
