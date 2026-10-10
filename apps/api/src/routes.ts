@@ -61,26 +61,24 @@ async function sanitiseImage(file: any, d: any) {
   const input = await readFile(path);
   const output =
     file.mime === "image/png"
-      ? await sharp(input, { failOn: "warning" }).rotate().png().toBuffer()
-      : await sharp(input, { failOn: "warning" })
+      ? await sharp(input, { failOn: "error" }).rotate().png().toBuffer()
+      : await sharp(input, { failOn: "error" })
           .rotate()
           .jpeg({ quality: 92 })
           .toBuffer();
   await writeFile(path, output, { mode: 0o600 });
-  await d
-    .collection("files")
-    .updateOne(
-      { _id: file._id },
-      {
-        $set: {
-          size: output.length,
-          checksum: createHash("sha256").update(output).digest("hex"),
-          scanStatus: "sanitised",
-          processingStatus: "available",
-          sanitisedAt: new Date(),
-        },
+  await d.collection("files").updateOne(
+    { _id: file._id },
+    {
+      $set: {
+        size: output.length,
+        checksum: createHash("sha256").update(output).digest("hex"),
+        scanStatus: "sanitised",
+        processingStatus: "available",
+        sanitisedAt: new Date(),
       },
-    );
+    },
+  );
   return {
     ...file,
     size: output.length,
@@ -113,42 +111,36 @@ export async function routes(app: FastifyInstance) {
       );
     const patientId = new ObjectId();
     const healthId = `NTH-${randomBytes(6).toString("hex").toUpperCase()}`;
-    await d
-      .collection("patients")
-      .insertOne({
-        _id: patientId,
-        healthId,
-        fullName: input.data.fullName,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        version: 1,
-      });
-    const result = await d
-      .collection("users")
-      .insertOne({
-        email: input.data.email.toLowerCase(),
-        passwordHash: await bcrypt.hash(input.data.password, 12),
-        fullName: input.data.fullName,
-        roles: ["patient"],
-        patientId,
-        state: "active",
-        emailVerified: true,
-        createdAt: new Date(),
-      });
+    await d.collection("patients").insertOne({
+      _id: patientId,
+      healthId,
+      fullName: input.data.fullName,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      version: 1,
+    });
+    const result = await d.collection("users").insertOne({
+      email: input.data.email.toLowerCase(),
+      passwordHash: await bcrypt.hash(input.data.password, 12),
+      fullName: input.data.fullName,
+      roles: ["patient"],
+      patientId,
+      state: "active",
+      emailVerified: true,
+      createdAt: new Date(),
+    });
     const s = await createSession(result.insertedId);
     setSessionCookies(rep, s.token, s.csrf);
-    return rep
-      .code(201)
-      .send({
-        user: {
-          id: result.insertedId.toString(),
-          email: input.data.email,
-          fullName: input.data.fullName,
-          roles: ["patient"],
-          patientId: patientId.toString(),
-          mfaVerified: false,
-        },
-      });
+    rep.code(201).send({
+      user: {
+        id: result.insertedId.toString(),
+        email: input.data.email,
+        fullName: input.data.fullName,
+        roles: ["patient"],
+        patientId: patientId.toString(),
+        mfaVerified: false,
+      },
+    });
   });
   app.post("/v1/auth/login", async (req, rep) => {
     const input = loginSchema.safeParse(req.body);
@@ -323,13 +315,11 @@ export async function routes(app: FastifyInstance) {
       d
         .collection("records")
         .countDocuments({ patientId, status: { $ne: "deleted" } }),
-      d
-        .collection("grants")
-        .countDocuments({
-          patientId,
-          revokedAt: null,
-          expiresAt: { $gt: new Date() },
-        }),
+      d.collection("grants").countDocuments({
+        patientId,
+        revokedAt: null,
+        expiresAt: { $gt: new Date() },
+      }),
       d.collection("history").countDocuments({ patientId }),
       d
         .collection("notifications")
@@ -383,25 +373,21 @@ export async function routes(app: FastifyInstance) {
       );
     const d = await db();
     const now = new Date();
-    const result = await d
-      .collection("records")
-      .insertOne({
-        ...input.data,
-        patientId: new ObjectId(u.patientId),
-        status: "available",
-        version: 1,
-        createdAt: now,
-        updatedAt: now,
-      });
-    await d
-      .collection("record_versions")
-      .insertOne({
-        recordId: result.insertedId,
-        patientId: new ObjectId(u.patientId),
-        version: 1,
-        snapshot: input.data,
-        finalisedAt: now,
-      });
+    const result = await d.collection("records").insertOne({
+      ...input.data,
+      patientId: new ObjectId(u.patientId),
+      status: "available",
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await d.collection("record_versions").insertOne({
+      recordId: result.insertedId,
+      patientId: new ObjectId(u.patientId),
+      version: 1,
+      snapshot: input.data,
+      finalisedAt: now,
+    });
     await audit({
       actorId: u.id,
       patientId: u.patientId,
@@ -411,13 +397,11 @@ export async function routes(app: FastifyInstance) {
       outcome: "success",
       requestId: req.id,
     });
-    return rep
-      .code(201)
-      .send({
-        record: shape(
-          await d.collection("records").findOne({ _id: result.insertedId }),
-        ),
-      });
+    return rep.code(201).send({
+      record: shape(
+        await d.collection("records").findOne({ _id: result.insertedId }),
+      ),
+    });
   });
   app.get("/v1/records/:id", async (req, rep) => {
     const u = await requireUser(req, rep);
@@ -509,28 +493,22 @@ export async function routes(app: FastifyInstance) {
           wording:
             "Automated comparison is not enabled. View the original report or ask the laboratory.",
         };
-    const result = await d
-      .collection("observations")
-      .insertOne({
-        ...input.data,
-        recordId: id,
-        patientId: new ObjectId(u.patientId),
-        evaluation: {
-          ...evaluation,
-          ruleVersion: "1.0",
-          evaluatedAt: new Date(),
-        },
-        createdAt: new Date(),
-      });
-    return rep
-      .code(201)
-      .send({
-        observation: shape(
-          await d
-            .collection("observations")
-            .findOne({ _id: result.insertedId }),
-        ),
-      });
+    const result = await d.collection("observations").insertOne({
+      ...input.data,
+      recordId: id,
+      patientId: new ObjectId(u.patientId),
+      evaluation: {
+        ...evaluation,
+        ruleVersion: "1.0",
+        evaluatedAt: new Date(),
+      },
+      createdAt: new Date(),
+    });
+    return rep.code(201).send({
+      observation: shape(
+        await d.collection("observations").findOne({ _id: result.insertedId }),
+      ),
+    });
   });
   app.get("/v1/history", async (req, rep) => {
     const u = await owner(req, rep);
@@ -566,24 +544,20 @@ export async function routes(app: FastifyInstance) {
     if (!input.success)
       return fail(rep, req, 400, "VALIDATION_ERROR", "Check the history item.");
     const d = await db();
-    const result = await d
-      .collection("history")
-      .insertOne({
-        ...input.data,
-        type,
-        patientId: new ObjectId(u.patientId),
-        source: "self_reported",
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        version: 1,
-      });
-    return rep
-      .code(201)
-      .send({
-        item: shape(
-          await d.collection("history").findOne({ _id: result.insertedId }),
-        ),
-      });
+    const result = await d.collection("history").insertOne({
+      ...input.data,
+      type,
+      patientId: new ObjectId(u.patientId),
+      source: "self_reported",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      version: 1,
+    });
+    return rep.code(201).send({
+      item: shape(
+        await d.collection("history").findOne({ _id: result.insertedId }),
+      ),
+    });
   });
   app.delete("/v1/history/:id", async (req, rep) => {
     const u = await owner(req, rep);
@@ -628,25 +602,21 @@ export async function routes(app: FastifyInstance) {
         "Check the medication and reminder details.",
       );
     const d = await db();
-    const result = await d
-      .collection("medication_schedules")
-      .insertOne({
-        ...input.data,
-        patientId: new ObjectId(u.patientId),
-        userId: new ObjectId(u.id),
-        active: true,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      });
-    return rep
-      .code(201)
-      .send({
-        item: shape(
-          await d
-            .collection("medication_schedules")
-            .findOne({ _id: result.insertedId }),
-        ),
-      });
+    const result = await d.collection("medication_schedules").insertOne({
+      ...input.data,
+      patientId: new ObjectId(u.patientId),
+      userId: new ObjectId(u.id),
+      active: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    return rep.code(201).send({
+      item: shape(
+        await d
+          .collection("medication_schedules")
+          .findOne({ _id: result.insertedId }),
+      ),
+    });
   });
   app.post("/v1/medications/:id/log", async (req, rep) => {
     const u = await owner(req, rep);
@@ -663,27 +633,23 @@ export async function routes(app: FastifyInstance) {
       );
     const d = await db();
     if (
-      !(await d
-        .collection("medication_schedules")
-        .findOne({
-          _id: id,
-          patientId: new ObjectId(u.patientId),
-          active: true,
-        }))
+      !(await d.collection("medication_schedules").findOne({
+        _id: id,
+        patientId: new ObjectId(u.patientId),
+        active: true,
+      }))
     )
       return fail(rep, req, 404, "NOT_FOUND", "Medication not found.");
-    await d
-      .collection("medication_logs")
-      .updateOne(
-        {
-          patientId: new ObjectId(u.patientId),
-          scheduleId: id,
-          scheduledDate: input.data.scheduledDate,
-          time: input.data.time,
-        },
-        { $set: { status: input.data.status, loggedAt: new Date() } },
-        { upsert: true },
-      );
+    await d.collection("medication_logs").updateOne(
+      {
+        patientId: new ObjectId(u.patientId),
+        scheduleId: id,
+        scheduledDate: input.data.scheduledDate,
+        time: input.data.time,
+      },
+      { $set: { status: input.data.status, loggedAt: new Date() } },
+      { upsert: true },
+    );
     return { ok: true };
   });
   app.delete("/v1/medications/:id", async (req, rep) => {
@@ -722,21 +688,17 @@ export async function routes(app: FastifyInstance) {
     if (!input.success)
       return fail(rep, req, 400, "VALIDATION_ERROR", "Check the test result.");
     const d = await db();
-    const result = await d
-      .collection("daily_tests")
-      .insertOne({
-        ...input.data,
-        measuredAt: new Date(input.data.measuredAt),
-        patientId: new ObjectId(u.patientId),
-        createdAt: new Date(),
-      });
-    return rep
-      .code(201)
-      .send({
-        item: shape(
-          await d.collection("daily_tests").findOne({ _id: result.insertedId }),
-        ),
-      });
+    const result = await d.collection("daily_tests").insertOne({
+      ...input.data,
+      measuredAt: new Date(input.data.measuredAt),
+      patientId: new ObjectId(u.patientId),
+      createdAt: new Date(),
+    });
+    return rep.code(201).send({
+      item: shape(
+        await d.collection("daily_tests").findOne({ _id: result.insertedId }),
+      ),
+    });
   });
   app.delete("/v1/daily-tests/:id", async (req, rep) => {
     const u = await owner(req, rep);
@@ -782,21 +744,19 @@ export async function routes(app: FastifyInstance) {
         "The notification subscription is invalid.",
       );
     const d = await db();
-    await d
-      .collection("push_subscriptions")
-      .updateOne(
-        { endpoint: String(subscription.endpoint) },
-        {
-          $set: {
-            userId: new ObjectId(u.id),
-            patientId: new ObjectId(u.patientId),
-            subscription,
-            updatedAt: new Date(),
-          },
-          $setOnInsert: { createdAt: new Date() },
+    await d.collection("push_subscriptions").updateOne(
+      { endpoint: String(subscription.endpoint) },
+      {
+        $set: {
+          userId: new ObjectId(u.id),
+          patientId: new ObjectId(u.patientId),
+          subscription,
+          updatedAt: new Date(),
         },
-        { upsert: true },
-      );
+        $setOnInsert: { createdAt: new Date() },
+      },
+      { upsert: true },
+    );
     return rep.code(201).send({ ok: true });
   });
   app.post("/v1/grants", async (req, rep) => {
@@ -812,13 +772,11 @@ export async function routes(app: FastifyInstance) {
         "Check the sharing details.",
       );
     const d = await db();
-    const recipient = await d
-      .collection("users")
-      .findOne({
-        email: input.data.recipientEmail.toLowerCase(),
-        roles: "practitioner",
-        practitionerStatus: "verified",
-      });
+    const recipient = await d.collection("users").findOne({
+      email: input.data.recipientEmail.toLowerCase(),
+      roles: "practitioner",
+      practitionerStatus: "verified",
+    });
     if (!recipient)
       return fail(
         rep,
@@ -837,12 +795,10 @@ export async function routes(app: FastifyInstance) {
         "One or more records are invalid.",
       );
     if (
-      (await d
-        .collection("records")
-        .countDocuments({
-          _id: { $in: ids as ObjectId[] },
-          patientId: new ObjectId(u.patientId),
-        })) !== ids.length
+      (await d.collection("records").countDocuments({
+        _id: { $in: ids as ObjectId[] },
+        patientId: new ObjectId(u.patientId),
+      })) !== ids.length
     )
       return fail(
         rep,
@@ -852,22 +808,20 @@ export async function routes(app: FastifyInstance) {
         "One or more records are unavailable.",
       );
     const claim = newToken();
-    const result = await d
-      .collection("grants")
-      .insertOne({
-        patientId: new ObjectId(u.patientId),
-        recipientId: recipient._id,
-        recipientName: recipient.fullName,
-        recipientEmail: recipient.email,
-        resourceIds: input.data.resourceIds,
-        actions: input.data.actions,
-        purpose: input.data.purpose,
-        expiresAt: new Date(Date.now() + input.data.durationHours * 3600000),
-        revokedAt: null,
-        claimTokenHash: hashToken(claim),
-        claimedAt: new Date(),
-        createdAt: new Date(),
-      });
+    const result = await d.collection("grants").insertOne({
+      patientId: new ObjectId(u.patientId),
+      recipientId: recipient._id,
+      recipientName: recipient.fullName,
+      recipientEmail: recipient.email,
+      resourceIds: input.data.resourceIds,
+      actions: input.data.actions,
+      purpose: input.data.purpose,
+      expiresAt: new Date(Date.now() + input.data.durationHours * 3600000),
+      revokedAt: null,
+      claimTokenHash: hashToken(claim),
+      claimedAt: new Date(),
+      createdAt: new Date(),
+    });
     await audit({
       actorId: u.id,
       patientId: u.patientId,
@@ -877,14 +831,12 @@ export async function routes(app: FastifyInstance) {
       outcome: "success",
       requestId: req.id,
     });
-    return rep
-      .code(201)
-      .send({
-        grant: shape(
-          await d.collection("grants").findOne({ _id: result.insertedId }),
-        ),
-        claimToken: claim,
-      });
+    return rep.code(201).send({
+      grant: shape(
+        await d.collection("grants").findOne({ _id: result.insertedId }),
+      ),
+      claimToken: claim,
+    });
   });
   app.get("/v1/grants", async (req, rep) => {
     const u = await owner(req, rep);
@@ -1136,42 +1088,38 @@ export async function routes(app: FastifyInstance) {
       ? body.category
       : "clinic";
     const d = await db();
-    await d
-      .collection("favourites")
-      .updateOne(
-        {
-          patientId: new ObjectId(u.patientId),
-          provider: "google",
-          providerPlaceId: body.providerPlaceId,
+    await d.collection("favourites").updateOne(
+      {
+        patientId: new ObjectId(u.patientId),
+        provider: "google",
+        providerPlaceId: body.providerPlaceId,
+      },
+      {
+        $set: {
+          name: String(body.name).slice(0, 160),
+          category,
+          address:
+            typeof body.address === "string"
+              ? body.address.slice(0, 300)
+              : undefined,
+          latitude: Number(body.latitude),
+          longitude: Number(body.longitude),
+          updatedAt: new Date(),
         },
-        {
-          $set: {
-            name: String(body.name).slice(0, 160),
-            category,
-            address:
-              typeof body.address === "string"
-                ? body.address.slice(0, 300)
-                : undefined,
-            latitude: Number(body.latitude),
-            longitude: Number(body.longitude),
-            updatedAt: new Date(),
-          },
-          $setOnInsert: { createdAt: new Date() },
-        },
-        { upsert: true },
-      );
+        $setOnInsert: { createdAt: new Date() },
+      },
+      { upsert: true },
+    );
     return rep.code(201).send({ ok: true });
   });
   app.delete("/v1/favourites/provider/:placeId", async (req, rep) => {
     const u = await owner(req, rep);
     if (!u || !assertCsrf(req, rep)) return;
     const d = await db();
-    await d
-      .collection("favourites")
-      .deleteOne({
-        patientId: new ObjectId(u.patientId),
-        providerPlaceId: (req.params as any).placeId,
-      });
+    await d.collection("favourites").deleteOne({
+      patientId: new ObjectId(u.patientId),
+      providerPlaceId: (req.params as any).placeId,
+    });
     return { ok: true };
   });
   app.post("/v1/favourites/:facilityId", async (req, rep) => {
@@ -1221,16 +1169,14 @@ export async function routes(app: FastifyInstance) {
     const u = await owner(req, rep);
     if (!u || !assertCsrf(req, rep)) return;
     const d = await db();
-    const result = await d
-      .collection("export_jobs")
-      .insertOne({
-        patientId: new ObjectId(u.patientId),
-        userId: new ObjectId(u.id),
-        status: "ready",
-        format: "json+fhir-r4",
-        expiresAt: new Date(Date.now() + 86400000),
-        createdAt: new Date(),
-      });
+    const result = await d.collection("export_jobs").insertOne({
+      patientId: new ObjectId(u.patientId),
+      userId: new ObjectId(u.id),
+      status: "ready",
+      format: "json+fhir-r4",
+      expiresAt: new Date(Date.now() + 86400000),
+      createdAt: new Date(),
+    });
     await audit({
       actorId: u.id,
       patientId: u.patientId,
@@ -1240,15 +1186,13 @@ export async function routes(app: FastifyInstance) {
       outcome: "success",
       requestId: req.id,
     });
-    return rep
-      .code(202)
-      .send({
-        job: {
-          id: result.insertedId.toString(),
-          status: "ready",
-          expiresAt: new Date(Date.now() + 86400000),
-        },
-      });
+    return rep.code(202).send({
+      job: {
+        id: result.insertedId.toString(),
+        status: "ready",
+        expiresAt: new Date(Date.now() + 86400000),
+      },
+    });
   });
   app.get("/v1/exports/:id", async (req, rep) => {
     const u = await owner(req, rep);
@@ -1256,13 +1200,11 @@ export async function routes(app: FastifyInstance) {
     const id = oid((req.params as any).id);
     if (!id) return fail(rep, req, 404, "NOT_FOUND", "Export not found.");
     const d = await db();
-    const job = await d
-      .collection("export_jobs")
-      .findOne({
-        _id: id,
-        patientId: new ObjectId(u.patientId),
-        expiresAt: { $gt: new Date() },
-      });
+    const job = await d.collection("export_jobs").findOne({
+      _id: id,
+      patientId: new ObjectId(u.patientId),
+      expiresAt: { $gt: new Date() },
+    });
     if (!job) return fail(rep, req, 404, "NOT_FOUND", "Export not found.");
     const [patient, records, history, observations] = await Promise.all([
       d.collection("patients").findOne({ _id: new ObjectId(u.patientId) }),
@@ -1314,24 +1256,20 @@ export async function routes(app: FastifyInstance) {
         { patientId: new ObjectId(u.patientId), revokedAt: null },
         { $set: { revokedAt: new Date() } },
       );
-    const result = await d
-      .collection("deletion_requests")
-      .insertOne({
-        patientId: new ObjectId(u.patientId),
-        userId: new ObjectId(u.id),
-        status: "recovery_period",
-        eligiblePurgeAt: new Date(Date.now() + 30 * 86400000),
-        createdAt: new Date(),
-      });
-    return rep
-      .code(202)
-      .send({
-        request: shape(
-          await d
-            .collection("deletion_requests")
-            .findOne({ _id: result.insertedId }),
-        ),
-      });
+    const result = await d.collection("deletion_requests").insertOne({
+      patientId: new ObjectId(u.patientId),
+      userId: new ObjectId(u.id),
+      status: "recovery_period",
+      eligiblePurgeAt: new Date(Date.now() + 30 * 86400000),
+      createdAt: new Date(),
+    });
+    return rep.code(202).send({
+      request: shape(
+        await d
+          .collection("deletion_requests")
+          .findOne({ _id: result.insertedId }),
+      ),
+    });
   });
   app.post("/v1/emergency/publish", async (req, rep) => {
     const u = await owner(req, rep);
@@ -1365,15 +1303,13 @@ export async function routes(app: FastifyInstance) {
         { patientId: new ObjectId(u.patientId), disabledAt: null },
         { $set: { disabledAt: new Date() } },
       );
-    await d
-      .collection("emergency_profiles")
-      .insertOne({
-        patientId: new ObjectId(u.patientId),
-        tokenHash: hashToken(token),
-        fields: body.fields,
-        createdAt: new Date(),
-        disabledAt: null,
-      });
+    await d.collection("emergency_profiles").insertOne({
+      patientId: new ObjectId(u.patientId),
+      tokenHash: hashToken(token),
+      fields: body.fields,
+      createdAt: new Date(),
+      disabledAt: null,
+    });
     return {
       token,
       warning: "Anyone with a copied link can see the selected information.",
@@ -1385,12 +1321,10 @@ export async function routes(app: FastifyInstance) {
       .header("x-robots-tag", "noindex, nofollow")
       .header("referrer-policy", "no-referrer");
     const d = await db();
-    const profile = await d
-      .collection("emergency_profiles")
-      .findOne({
-        tokenHash: hashToken((req.params as any).token),
-        disabledAt: null,
-      });
+    const profile = await d.collection("emergency_profiles").findOne({
+      tokenHash: hashToken((req.params as any).token),
+      disabledAt: null,
+    });
     if (!profile)
       return fail(
         rep,
@@ -1476,16 +1410,14 @@ export async function routes(app: FastifyInstance) {
       outcome: "success",
       requestId: req.id,
     });
-    return rep
-      .code(201)
-      .send({
-        share: {
-          id: result.insertedId.toString(),
-          kind,
-          expiresAt: share.expiresAt,
-        },
-        url: `${config.APP_ORIGIN}/public/${token}`,
-      });
+    return rep.code(201).send({
+      share: {
+        id: result.insertedId.toString(),
+        kind,
+        expiresAt: share.expiresAt,
+      },
+      url: `${config.APP_ORIGIN}/public/${token}`,
+    });
   });
   app.get("/v1/public/:token", async (req, rep) => {
     rep
@@ -1493,13 +1425,11 @@ export async function routes(app: FastifyInstance) {
       .header("x-robots-tag", "noindex, nofollow")
       .header("referrer-policy", "no-referrer");
     const d = await db();
-    const share = await d
-      .collection("public_shares")
-      .findOne({
-        tokenHash: hashToken((req.params as any).token),
-        revokedAt: null,
-        expiresAt: { $gt: new Date() },
-      });
+    const share = await d.collection("public_shares").findOne({
+      tokenHash: hashToken((req.params as any).token),
+      revokedAt: null,
+      expiresAt: { $gt: new Date() },
+    });
     if (!share)
       return fail(
         rep,
@@ -1512,13 +1442,11 @@ export async function routes(app: FastifyInstance) {
       .collection("patients")
       .findOne({ _id: share.patientId });
     if (share.kind === "record") {
-      const record = await d
-        .collection("records")
-        .findOne({
-          _id: share.recordId,
-          patientId: share.patientId,
-          status: { $ne: "deleted" },
-        });
+      const record = await d.collection("records").findOne({
+        _id: share.recordId,
+        patientId: share.patientId,
+        status: { $ne: "deleted" },
+      });
       const files = await d
         .collection("files")
         .find({ recordId: share.recordId, patientId: share.patientId })
@@ -1583,29 +1511,33 @@ export async function routes(app: FastifyInstance) {
       .header("cache-control", "no-store")
       .header("x-robots-tag", "noindex, nofollow");
     const d = await db();
-    const share = await d
-      .collection("public_shares")
-      .findOne({
-        tokenHash: hashToken((req.params as any).token),
-        kind: "record",
-        revokedAt: null,
-        expiresAt: { $gt: new Date() },
-      });
+    const share = await d.collection("public_shares").findOne({
+      tokenHash: hashToken((req.params as any).token),
+      kind: "record",
+      revokedAt: null,
+      expiresAt: { $gt: new Date() },
+    });
     const id = oid((req.params as any).id);
     if (!share || !id)
       return fail(rep, req, 404, "NOT_FOUND", "File not found.");
-    let file: any = await d
-      .collection("files")
-      .findOne({
-        _id: id,
-        recordId: share.recordId,
-        patientId: share.patientId,
-      });
+    let file: any = await d.collection("files").findOne({
+      _id: id,
+      recordId: share.recordId,
+      patientId: share.patientId,
+    });
     if (!file) return fail(rep, req, 404, "NOT_FOUND", "File not found.");
     if (file.mime.startsWith("image/") && file.processingStatus !== "available")
       try {
         file = await sanitiseImage(file, d);
-      } catch {
+      } catch (error: any) {
+        if (error?.code === "ENOENT")
+          return fail(
+            rep,
+            req,
+            410,
+            "FILE_STORAGE_MISSING",
+            "This file was lost during a server redeployment. Please ask the owner to upload it again.",
+          );
         return fail(
           rep,
           req,
@@ -1631,8 +1563,20 @@ export async function routes(app: FastifyInstance) {
         "content-disposition",
         `inline; filename*=UTF-8''${encodeURIComponent(file.originalName)}`,
       )
-      .header("x-content-type-options", "nosniff")
-      .send(await readFile(join(config.UPLOAD_DIR, file.storageKey)));
+      .header("x-content-type-options", "nosniff");
+    try {
+      return rep.send(await readFile(join(config.UPLOAD_DIR, file.storageKey)));
+    } catch (error: any) {
+      if (error?.code === "ENOENT")
+        return fail(
+          rep,
+          req,
+          410,
+          "FILE_STORAGE_MISSING",
+          "This file was lost during a server redeployment. Please ask the owner to upload it again.",
+        );
+      throw error;
+    }
   });
   app.post("/v1/records/:id/files", async (req, rep) => {
     const u = await owner(req, rep);
@@ -1641,13 +1585,11 @@ export async function routes(app: FastifyInstance) {
     if (!recordId) return fail(rep, req, 404, "NOT_FOUND", "Record not found.");
     const d = await db();
     if (
-      !(await d
-        .collection("records")
-        .findOne({
-          _id: recordId,
-          patientId: new ObjectId(u.patientId),
-          status: { $ne: "deleted" },
-        }))
+      !(await d.collection("records").findOne({
+        _id: recordId,
+        patientId: new ObjectId(u.patientId),
+        status: { $ne: "deleted" },
+      }))
     )
       return fail(rep, req, 404, "NOT_FOUND", "Record not found.");
     const file = await req.file({
@@ -1691,16 +1633,21 @@ export async function routes(app: FastifyInstance) {
       try {
         bytes =
           file.mimetype === "image/png"
-            ? await sharp(bytes, { failOn: "warning" })
-                .rotate()
-                .png()
-                .toBuffer()
-            : await sharp(bytes, { failOn: "warning" })
+            ? await sharp(bytes, { failOn: "error" }).rotate().png().toBuffer()
+            : await sharp(bytes, { failOn: "error" })
                 .rotate()
                 .jpeg({ quality: 92 })
                 .toBuffer();
         scanStatus = "sanitised";
-      } catch {
+      } catch (error: any) {
+        if (error?.code === "ENOENT")
+          return fail(
+            rep,
+            req,
+            410,
+            "FILE_STORAGE_MISSING",
+            "This file was lost during a server redeployment. Please upload it again.",
+          );
         return fail(
           rep,
           req,
@@ -1719,21 +1666,19 @@ export async function routes(app: FastifyInstance) {
       scanStatus === "clean" || scanStatus === "sanitised"
         ? "available"
         : "pending";
-    await d
-      .collection("files")
-      .insertOne({
-        _id: objectId,
-        recordId,
-        patientId: new ObjectId(u.patientId),
-        originalName: file.filename,
-        mime: file.mimetype,
-        size: bytes.length,
-        checksum: createHash("sha256").update(bytes).digest("hex"),
-        storageKey: objectId.toString(),
-        scanStatus,
-        processingStatus,
-        createdAt: new Date(),
-      });
+    await d.collection("files").insertOne({
+      _id: objectId,
+      recordId,
+      patientId: new ObjectId(u.patientId),
+      originalName: file.filename,
+      mime: file.mimetype,
+      size: bytes.length,
+      checksum: createHash("sha256").update(bytes).digest("hex"),
+      storageKey: objectId.toString(),
+      scanStatus,
+      processingStatus,
+      createdAt: new Date(),
+    });
     await audit({
       actorId: u.id,
       patientId: u.patientId,
@@ -1743,18 +1688,16 @@ export async function routes(app: FastifyInstance) {
       outcome: "success",
       requestId: req.id,
     });
-    return rep
-      .code(202)
-      .send({
-        file: {
-          id: objectId.toString(),
-          name: file.filename,
-          mime: file.mimetype,
-          size: bytes.length,
-          scanStatus,
-          processingStatus,
-        },
-      });
+    return rep.code(202).send({
+      file: {
+        id: objectId.toString(),
+        name: file.filename,
+        mime: file.mimetype,
+        size: bytes.length,
+        scanStatus,
+        processingStatus,
+      },
+    });
   });
   app.get("/v1/files/:id/content", async (req, rep) => {
     const u = await requireUser(req, rep);
@@ -1777,7 +1720,15 @@ export async function routes(app: FastifyInstance) {
     if (file.mime.startsWith("image/") && file.processingStatus !== "available")
       try {
         file = await sanitiseImage(file, d);
-      } catch {
+      } catch (error: any) {
+        if (error?.code === "ENOENT")
+          return fail(
+            rep,
+            req,
+            410,
+            "FILE_STORAGE_MISSING",
+            "This file was lost during a server redeployment. Please upload it again.",
+          );
         return fail(
           rep,
           req,
@@ -1797,7 +1748,20 @@ export async function routes(app: FastifyInstance) {
         "FILE_PENDING",
         "This file is not available until its safety checks pass.",
       );
-    const content = await readFile(join(config.UPLOAD_DIR, file.storageKey));
+    let content: Buffer;
+    try {
+      content = await readFile(join(config.UPLOAD_DIR, file.storageKey));
+    } catch (error: any) {
+      if (error?.code === "ENOENT")
+        return fail(
+          rep,
+          req,
+          410,
+          "FILE_STORAGE_MISSING",
+          "This file was lost during a server redeployment. Please upload it again.",
+        );
+      throw error;
+    }
     await audit({
       actorId: (u as any).id,
       patientId: file.patientId.toString(),

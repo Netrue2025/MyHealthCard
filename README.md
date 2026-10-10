@@ -33,6 +33,8 @@ Synthetic accounts:
 
 Create a Railway project with this repository and a MongoDB service/plugin. Set all variables from `.env.example`, particularly `MONGODB_URI`, a random 32+ character `SESSION_SECRET`, `APP_ORIGIN` and `API_ORIGIN` to the final HTTPS URL, `COOKIE_SECURE=true`, and `SCANNER_MODE=fail-closed` until a real ClamAV-compatible scanner adapter is connected. Use a persistent volume only for temporary quarantine; production originals belong in private S3-compatible object storage.
 
+Until private object storage is connected, attach a Railway persistent volume to the application service at `/data` and set `UPLOAD_DIR=/data/uploads`. Without a volume, Railway redeployments erase locally uploaded files while their MongoDB metadata remains. Files lost before the volume was attached must be uploaded again.
+
 Railway uses `railway.json`, builds the web and API together, serves the PWA from Fastify, and checks `/health/ready`. Run `pnpm seed` only in a synthetic development environment.
 
 ### Medication push reminders
