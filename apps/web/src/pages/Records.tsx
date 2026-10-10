@@ -172,12 +172,12 @@ function List() {
             />
             <Field label="Report date" name="reportDate" type="date" />
             <label className="field">
-              <span>Comments</span>
+              <span>Medical comments</span>
               <textarea
                 name="comments"
                 rows={3}
                 maxLength={2000}
-                placeholder="Add a note about this report (optional)"
+                placeholder="Add symptoms, doctor's comments, or context about this report (optional)"
               />
             </label>
             <div className="capture-options">

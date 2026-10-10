@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   ArrowUpRight,
@@ -14,7 +15,7 @@ import {
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api";
-import { ErrorState, Loading, Status, fmtDate } from "../components";
+import { Button, ErrorState, Loading, Modal, Status, fmtDate } from "../components";
 import type { Me } from "../App";
 
 function ActivityChart({ value }: { value: number }) {
@@ -55,6 +56,7 @@ function ActivityChart({ value }: { value: number }) {
 
 export default function Dashboard({ me }: { me: Me }) {
   const nav = useNavigate();
+  const [careOverview, setCareOverview] = useState(false);
   const dash = useQuery({
     queryKey: ["dashboard"],
     queryFn: () => api<any>("/v1/dashboard"),
@@ -145,7 +147,7 @@ export default function Dashboard({ me }: { me: Me }) {
           </div>
         </article>
       </section>
-      <button className="home-care-card" onClick={() => nav("/daily-care")}>
+      <button className="home-care-card" onClick={() => setCareOverview(true)}>
         <div className="home-care-heading">
           <span className="care-heart"><HeartPulse /></span>
           <div><span>Daily care</span><strong>Today at a glance</strong></div>
@@ -230,6 +232,26 @@ export default function Dashboard({ me }: { me: Me }) {
             </article>
           ))}
         </section>
+      )}
+      {careOverview && (
+        <Modal title="Today's health overview" onClose={() => setCareOverview(false)}>
+          <div className="care-overview-modal">
+            <div className="care-overview-grid">
+              <article><Pill /><strong>{dash.data.dailyCare.medications}</strong><span>Active medicines</span></article>
+              <article><CheckCircle2 /><strong>{dash.data.dailyCare.takenToday}</strong><span>Doses taken today</span></article>
+            </div>
+            <section className="care-latest-test">
+              <span><FlaskConical /></span>
+              <div>
+                <small>Latest test</small>
+                <strong>{dash.data.dailyCare.latestTest?.testType?.replaceAll("_", " ") ?? "No test recorded"}</strong>
+                {dash.data.dailyCare.latestTest && <p>{dash.data.dailyCare.latestTest.value} {dash.data.dailyCare.latestTest.unit}</p>}
+              </div>
+            </section>
+            {dash.data.dailyCare.latestTest?.notes && <div className="care-overview-note"><strong>Note</strong><p>{dash.data.dailyCare.latestTest.notes}</p></div>}
+            <div className="modal-actions"><Button variant="secondary" onClick={() => setCareOverview(false)}>Close</Button><Button onClick={() => nav("/daily-care")}>Open Daily Care <ArrowUpRight /></Button></div>
+          </div>
+        </Modal>
       )}
     </div>
   );
