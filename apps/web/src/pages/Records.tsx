@@ -9,6 +9,7 @@ import {
   FlaskConical,
   Image,
   Search,
+  Trash2,
   UploadCloud,
 } from "lucide-react";
 import {
@@ -253,6 +254,17 @@ function Detail({ me: _me }: { me: Me }) {
     },
     onError: (e: Error) => setUploadError(e.message),
   });
+  const deleteRecord = useMutation({
+    mutationFn: () => send("DELETE", `/v1/records/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["records"] });
+      nav("/records");
+    },
+  });
+  const deleteFile = useMutation({
+    mutationFn: (fileId: string) => send("DELETE", `/v1/files/${fileId}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["record", id] }),
+  });
   if (record.isLoading) return <Loading />;
   if (record.error)
     return <ErrorState message={(record.error as Error).message} />;
@@ -277,6 +289,17 @@ function Detail({ me: _me }: { me: Me }) {
         </div>
         <div className="record-head-actions">
           <PublicShareButton kind="record" recordId={id} />
+          <Button
+            variant="danger"
+            disabled={deleteRecord.isPending}
+            onClick={() =>
+              confirm(
+                "Delete this medical record and all its documents? This cannot be undone.",
+              ) && deleteRecord.mutate()
+            }
+          >
+            <Trash2 /> Delete
+          </Button>
           <Status kind="green" label="Ready" />
         </div>
       </header>
@@ -336,6 +359,18 @@ function Detail({ me: _me }: { me: Me }) {
                       aria-label={`View ${f.name}`}
                     >
                       <Eye />
+                    </button>
+                    <button
+                      className="file-delete-button"
+                      disabled={deleteFile.isPending}
+                      title="Delete document"
+                      onClick={() =>
+                        confirm(`Delete ${f.name}? This cannot be undone.`) &&
+                        deleteFile.mutate(f.id)
+                      }
+                      aria-label={`Delete ${f.name}`}
+                    >
+                      <Trash2 />
                     </button>
                   </article>
                 );

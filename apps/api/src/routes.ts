@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ObjectId } from "mongodb";
 import bcrypt from "bcryptjs";
 import { createHash, randomBytes } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   loginSchema,
@@ -461,14 +461,23 @@ export async function routes(app: FastifyInstance) {
     const id = oid((req.params as any).id);
     if (!id) return fail(rep, req, 404, "NOT_FOUND", "Record not found.");
     const d = await db();
+    const patientId = new ObjectId(u.patientId);
     const result = await d
       .collection("records")
       .updateOne(
-        { _id: id, patientId: new ObjectId(u.patientId) },
+        { _id: id, patientId, status: { $ne: "deleted" } },
         { $set: { status: "deleted", deletedAt: new Date() } },
       );
     if (!result.matchedCount)
       return fail(rep, req, 404, "NOT_FOUND", "Record not found.");
+    const files = await d.collection("files").find({ recordId: id, patientId }).toArray();
+    await Promise.all(files.map((file) => rm(join(config.UPLOAD_DIR, file.storageKey), { force: true })));
+    await Promise.all([
+      d.collection("files").deleteMany({ recordId: id, patientId }),
+      d.collection("observations").deleteMany({ recordId: id, patientId }),
+      d.collection("public_shares").updateMany({ recordId: id, patientId, revokedAt: null }, { $set: { revokedAt: new Date() } }),
+    ]);
+    await audit({actorId:u.id,patientId:u.patientId,action:"record.delete",resourceType:"record",resourceId:id.toString(),outcome:"success",requestId:req.id});
     return { ok: true };
   });
   app.post("/v1/records/:id/observations", async (req, rep) => {
@@ -1698,6 +1707,20 @@ export async function routes(app: FastifyInstance) {
         processingStatus,
       },
     });
+  });
+  app.delete("/v1/files/:id", async (req, rep) => {
+    const u = await owner(req, rep);
+    if (!u || !assertCsrf(req, rep)) return;
+    const id = oid((req.params as any).id);
+    if (!id) return fail(rep, req, 404, "NOT_FOUND", "Document not found.");
+    const d = await db();
+    const patientId = new ObjectId(u.patientId);
+    const file = await d.collection("files").findOne({ _id: id, patientId });
+    if (!file) return fail(rep, req, 404, "NOT_FOUND", "Document not found.");
+    await rm(join(config.UPLOAD_DIR, file.storageKey), { force: true });
+    await d.collection("files").deleteOne({ _id: id, patientId });
+    await audit({actorId:u.id,patientId:u.patientId,action:"file.delete",resourceType:"file",resourceId:id.toString(),outcome:"success",requestId:req.id});
+    return { ok: true };
   });
   app.get("/v1/files/:id/content", async (req, rep) => {
     const u = await requireUser(req, rep);
