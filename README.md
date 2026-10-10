@@ -35,6 +35,10 @@ Create a Railway project with this repository and a MongoDB service/plugin. Set 
 
 Railway uses `railway.json`, builds the web and API together, serves the PWA from Fastify, and checks `/health/ready`. Run `pnpm seed` only in a synthetic development environment.
 
+### Medication push reminders
+
+Generate a VAPID key pair with `npx web-push generate-vapid-keys`, then add `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, and a valid `VAPID_SUBJECT` (normally a `mailto:` address) to Railway. Users must tap **Enable alerts** once on each device and allow notifications. The reminder worker checks due daily schedules every 30 seconds and uses a unique delivery record to prevent duplicate notifications. Notification text is deliberately generic so medication details are not exposed on a lock screen.
+
 ### Google Find Care setup
 
 Enable **Places API (New)** and **Geocoding API** in Google Cloud. Set `GOOGLE_PLACES_API_KEY` only on the API/Railway service and restrict it to those APIs and the server environment. The optional `VITE_GOOGLE_MAPS_BROWSER_KEY` must use HTTP-referrer restrictions and Maps JavaScript API restrictions; the current low-bandwidth map view does not require it. Never reuse an unrestricted browser key as the server key.

@@ -6,6 +6,7 @@ const schema = z.object({
   MONGODB_URI: z.string().min(1).default("mongodb://localhost:27017/netrue_health"), SESSION_SECRET: z.string().min(32).default("development-only-secret-change-me-000000"),
   UPLOAD_DIR: z.string().default("./uploads"), COOKIE_SECURE: bool.default("false"), SCANNER_MODE: z.enum(["fail-closed","clamav","development-clean"]).default("fail-closed"),
   GOOGLE_PLACES_API_KEY: z.string().optional(),
+  VAPID_PUBLIC_KEY: z.string().optional(), VAPID_PRIVATE_KEY: z.string().optional(), VAPID_SUBJECT: z.string().default("mailto:care@netrue.example"),
   FEATURE_RESULT_COMPARISON: bool.default("false"), FEATURE_OCR: bool.default("false"), FEATURE_EMERGENCY_PROFILE: bool.default("false")
 });
 const parsed = schema.safeParse(process.env);
