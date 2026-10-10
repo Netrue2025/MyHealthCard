@@ -213,6 +213,10 @@ export async function routes(app: FastifyInstance) {
   app.get("/v1/me", async (req, rep) => {
     const u = await requireUser(req, rep);
     if (!u) return;
+    const sessionToken = req.cookies.netrue_session;
+    const csrfToken = req.cookies.netrue_csrf;
+    if (sessionToken && csrfToken)
+      setSessionCookies(rep, sessionToken, csrfToken);
     return {
       user: u,
       features: {
