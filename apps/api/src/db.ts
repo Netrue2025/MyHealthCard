@@ -56,5 +56,14 @@ export async function ensureIndexes() {
     d
       .collection("public_shares")
       .createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
+    d.collection("projects").createIndex({ ownerId: 1, updatedAt: -1 }),
+    d
+      .collection("project_members")
+      .createIndex({ projectId: 1, email: 1 }, { unique: true }),
+    d.collection("project_members").createIndex({ email: 1, projectId: 1 }),
+    d.collection("project_sections").createIndex({ projectId: 1, position: 1 }),
+    d
+      .collection("project_sections")
+      .createIndex({ plannedDate: 1, projectId: 1 }),
   ]);
 }

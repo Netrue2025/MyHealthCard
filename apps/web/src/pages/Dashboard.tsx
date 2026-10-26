@@ -5,9 +5,12 @@ import {
   Bell,
   Building2,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   FilePlus2,
   FileText,
   FlaskConical,
+  FolderKanban,
   HeartPulse,
   Pill,
   Share2,
@@ -15,7 +18,14 @@ import {
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api";
-import { Button, ErrorState, Loading, Modal, Status, fmtDate } from "../components";
+import {
+  Button,
+  ErrorState,
+  Loading,
+  Modal,
+  Status,
+  fmtDate,
+} from "../components";
 import type { Me } from "../App";
 
 function ActivityChart({ value }: { value: number }) {
@@ -54,12 +64,23 @@ function ActivityChart({ value }: { value: number }) {
   );
 }
 
+function localDate() {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "Africa/Lagos" });
+}
+
+function shiftDate(value: string, days: number) {
+  const date = new Date(`${value}T12:00:00`);
+  date.setDate(date.getDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
 export default function Dashboard({ me }: { me: Me }) {
   const nav = useNavigate();
   const [careOverview, setCareOverview] = useState(false);
+  const [taskDate, setTaskDate] = useState(localDate);
   const dash = useQuery({
-    queryKey: ["dashboard"],
-    queryFn: () => api<any>("/v1/dashboard"),
+    queryKey: ["dashboard", taskDate],
+    queryFn: () => api<any>(`/v1/dashboard?date=${taskDate}`),
   });
   const records = useQuery({
     queryKey: ["records", "recent"],
@@ -149,16 +170,88 @@ export default function Dashboard({ me }: { me: Me }) {
       </section>
       <button className="home-care-card" onClick={() => setCareOverview(true)}>
         <div className="home-care-heading">
-          <span className="care-heart"><HeartPulse /></span>
-          <div><span>Daily care</span><strong>Today at a glance</strong></div>
+          <span className="care-heart">
+            <HeartPulse />
+          </span>
+          <div>
+            <span>Daily care</span>
+            <strong>Today at a glance</strong>
+          </div>
           <ArrowUpRight />
         </div>
         <div className="home-care-stats">
-          <span><Pill /><b>{dash.data.dailyCare.medications}</b><small>Medicines</small></span>
-          <span><CheckCircle2 /><b>{dash.data.dailyCare.takenToday}</b><small>Taken today</small></span>
-          <span><FlaskConical /><b>{dash.data.dailyCare.latestTest?.value ?? "—"}</b><small>{dash.data.dailyCare.latestTest?.testType?.replaceAll("_", " ") ?? "Latest test"}</small></span>
+          <span>
+            <Pill />
+            <b>{dash.data.dailyCare.medications}</b>
+            <small>Medicines</small>
+          </span>
+          <span>
+            <CheckCircle2 />
+            <b>{dash.data.dailyCare.takenToday}</b>
+            <small>Taken today</small>
+          </span>
+          <span>
+            <FlaskConical />
+            <b>{dash.data.dailyCare.latestTest?.value ?? "—"}</b>
+            <small>
+              {dash.data.dailyCare.latestTest?.testType?.replaceAll("_", " ") ??
+                "Latest test"}
+            </small>
+          </span>
         </div>
       </button>
+      <section className="panel day-tasks">
+        <header>
+          <button
+            className="day-switch"
+            onClick={() => setTaskDate((value) => shiftDate(value, -1))}
+            aria-label="View previous day"
+          >
+            <ChevronLeft />
+          </button>
+          <div>
+            <span className="eyebrow">Project plan</span>
+            <h2>
+              {taskDate === localDate() ? "Today’s tasks" : fmtDate(taskDate)}
+            </h2>
+          </div>
+          <button
+            className="day-switch"
+            onClick={() => setTaskDate((value) => shiftDate(value, 1))}
+            aria-label="View next day"
+          >
+            <ChevronRight />
+          </button>
+        </header>
+        {dash.data.projectTasks?.items?.length ? (
+          <div className="day-task-list">
+            {dash.data.projectTasks.items.map((task: any) => (
+              <button
+                className="day-task-row"
+                key={task.id}
+                onClick={() => nav(`/projects/${task.projectId}`)}
+              >
+                <span>
+                  <FolderKanban />
+                </span>
+                <div>
+                  <strong>{task.title}</strong>
+                  <small>{task.projectTitle}</small>
+                </div>
+                <ArrowUpRight />
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="day-task-empty">
+            <FolderKanban />
+            <span>No project tasks planned for this day.</span>
+            <button className="text-button" onClick={() => nav("/projects")}>
+              Projects <ArrowUpRight />
+            </button>
+          </div>
+        )}
+      </section>
       <div className="dashboard-grid">
         <section className="panel">
           <header>
@@ -234,22 +327,60 @@ export default function Dashboard({ me }: { me: Me }) {
         </section>
       )}
       {careOverview && (
-        <Modal title="Today's health overview" onClose={() => setCareOverview(false)}>
+        <Modal
+          title="Today's health overview"
+          onClose={() => setCareOverview(false)}
+        >
           <div className="care-overview-modal">
             <div className="care-overview-grid">
-              <article><Pill /><strong>{dash.data.dailyCare.medications}</strong><span>Active medicines</span></article>
-              <article><CheckCircle2 /><strong>{dash.data.dailyCare.takenToday}</strong><span>Doses taken today</span></article>
+              <article>
+                <Pill />
+                <strong>{dash.data.dailyCare.medications}</strong>
+                <span>Active medicines</span>
+              </article>
+              <article>
+                <CheckCircle2 />
+                <strong>{dash.data.dailyCare.takenToday}</strong>
+                <span>Doses taken today</span>
+              </article>
             </div>
             <section className="care-latest-test">
-              <span><FlaskConical /></span>
+              <span>
+                <FlaskConical />
+              </span>
               <div>
                 <small>Latest test</small>
-                <strong>{dash.data.dailyCare.latestTest?.testType?.replaceAll("_", " ") ?? "No test recorded"}</strong>
-                {dash.data.dailyCare.latestTest && <p>{dash.data.dailyCare.latestTest.value} {dash.data.dailyCare.latestTest.unit}</p>}
+                <strong>
+                  {dash.data.dailyCare.latestTest?.testType?.replaceAll(
+                    "_",
+                    " ",
+                  ) ?? "No test recorded"}
+                </strong>
+                {dash.data.dailyCare.latestTest && (
+                  <p>
+                    {dash.data.dailyCare.latestTest.value}{" "}
+                    {dash.data.dailyCare.latestTest.unit}
+                  </p>
+                )}
               </div>
             </section>
-            {dash.data.dailyCare.latestTest?.notes && <div className="care-overview-note"><strong>Note</strong><p>{dash.data.dailyCare.latestTest.notes}</p></div>}
-            <div className="modal-actions"><Button variant="secondary" onClick={() => setCareOverview(false)}>Close</Button><Button onClick={() => nav("/daily-care")}>Open Daily Care <ArrowUpRight /></Button></div>
+            {dash.data.dailyCare.latestTest?.notes && (
+              <div className="care-overview-note">
+                <strong>Note</strong>
+                <p>{dash.data.dailyCare.latestTest.notes}</p>
+              </div>
+            )}
+            <div className="modal-actions">
+              <Button
+                variant="secondary"
+                onClick={() => setCareOverview(false)}
+              >
+                Close
+              </Button>
+              <Button onClick={() => nav("/daily-care")}>
+                Open Daily Care <ArrowUpRight />
+              </Button>
+            </div>
           </div>
         </Modal>
       )}

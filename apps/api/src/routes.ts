@@ -15,6 +15,9 @@ import {
   medicationSchema,
   medicationLogSchema,
   dailyTestSchema,
+  projectSchema,
+  projectSectionSchema,
+  projectMemberSchema,
 } from "@netrue/shared";
 import { evaluateResult } from "@netrue/results";
 import { authorize } from "@netrue/policy";
@@ -53,6 +56,16 @@ async function owner(request: FastifyRequest, reply: FastifyReply) {
   const u = await requireUser(request, reply);
   if (!u || !(u as any).patientId) return null;
   return u as any;
+}
+async function projectAccess(d: any, projectId: ObjectId, email: string) {
+  const project = await d.collection("projects").findOne({ _id: projectId });
+  if (!project) return null;
+  if (project.ownerEmail === email.toLowerCase())
+    return { project, role: "owner" as const };
+  const member = await d
+    .collection("project_members")
+    .findOne({ projectId, email: email.toLowerCase() });
+  return member ? { project, role: "member" as const } : null;
 }
 async function sanitiseImage(file: any, d: any) {
   if (!file.mime?.startsWith("image/") || file.processingStatus === "available")
@@ -315,8 +328,20 @@ export async function routes(app: FastifyInstance) {
     if (!u) return;
     const d = await db();
     const patientId = new ObjectId(u.patientId);
+    const requestedDate = String((req.query as any)?.date ?? "");
+    const taskDate = /^\d{4}-\d{2}-\d{2}$/.test(requestedDate)
+      ? requestedDate
+      : new Date().toISOString().slice(0, 10);
     const today = new Date().toISOString().slice(0, 10);
-    const [records, grants, history, notifications, medications, takenToday, latestTest] = await Promise.all([
+    const [
+      records,
+      grants,
+      history,
+      notifications,
+      medications,
+      takenToday,
+      latestTest,
+    ] = await Promise.all([
       d
         .collection("records")
         .countDocuments({ patientId, status: { $ne: "deleted" } }),
@@ -332,14 +357,56 @@ export async function routes(app: FastifyInstance) {
         .sort({ createdAt: -1 })
         .limit(5)
         .toArray(),
-      d.collection("medication_schedules").countDocuments({ patientId, active: true }),
-      d.collection("medication_logs").countDocuments({ patientId, scheduledDate: today, status: "taken" }),
-      d.collection("daily_tests").findOne({ patientId }, { sort: { measuredAt: -1 } }),
+      d
+        .collection("medication_schedules")
+        .countDocuments({ patientId, active: true }),
+      d
+        .collection("medication_logs")
+        .countDocuments({ patientId, scheduledDate: today, status: "taken" }),
+      d
+        .collection("daily_tests")
+        .findOne({ patientId }, { sort: { measuredAt: -1 } }),
     ]);
+    const email = u.email.toLowerCase();
+    const memberships = await d
+      .collection("project_members")
+      .find({ email })
+      .toArray();
+    const projects = await d
+      .collection("projects")
+      .find({
+        $or: [
+          { ownerEmail: email },
+          { _id: { $in: memberships.map((m: any) => m.projectId) } },
+        ],
+        status: { $ne: "completed" },
+      })
+      .toArray();
+    const tasks = projects.length
+      ? await d
+          .collection("project_sections")
+          .find({
+            projectId: { $in: projects.map((p: any) => p._id) },
+            plannedDate: taskDate,
+            completed: false,
+          })
+          .sort({ position: 1 })
+          .toArray()
+      : [];
+    const projectNames = new Map(
+      projects.map((p: any) => [p._id.toString(), p.title]),
+    );
     return {
       counts: { records, activeShares: grants, history },
       notifications: notifications.map(shape),
       dailyCare: { medications, takenToday, latestTest: shape(latestTest) },
+      projectTasks: {
+        date: taskDate,
+        items: tasks.map((task: any) => ({
+          ...shape(task),
+          projectTitle: projectNames.get(task.projectId.toString()),
+        })),
+      },
     };
   });
   app.get("/v1/records", async (req, rep) => {
@@ -479,14 +546,34 @@ export async function routes(app: FastifyInstance) {
       );
     if (!result.matchedCount)
       return fail(rep, req, 404, "NOT_FOUND", "Record not found.");
-    const files = await d.collection("files").find({ recordId: id, patientId }).toArray();
-    await Promise.all(files.map((file) => rm(join(config.UPLOAD_DIR, file.storageKey), { force: true })));
+    const files = await d
+      .collection("files")
+      .find({ recordId: id, patientId })
+      .toArray();
+    await Promise.all(
+      files.map((file) =>
+        rm(join(config.UPLOAD_DIR, file.storageKey), { force: true }),
+      ),
+    );
     await Promise.all([
       d.collection("files").deleteMany({ recordId: id, patientId }),
       d.collection("observations").deleteMany({ recordId: id, patientId }),
-      d.collection("public_shares").updateMany({ recordId: id, patientId, revokedAt: null }, { $set: { revokedAt: new Date() } }),
+      d
+        .collection("public_shares")
+        .updateMany(
+          { recordId: id, patientId, revokedAt: null },
+          { $set: { revokedAt: new Date() } },
+        ),
     ]);
-    await audit({actorId:u.id,patientId:u.patientId,action:"record.delete",resourceType:"record",resourceId:id.toString(),outcome:"success",requestId:req.id});
+    await audit({
+      actorId: u.id,
+      patientId: u.patientId,
+      action: "record.delete",
+      resourceType: "record",
+      resourceId: id.toString(),
+      outcome: "success",
+      requestId: req.id,
+    });
     return { ok: true };
   });
   app.post("/v1/records/:id/observations", async (req, rep) => {
@@ -726,13 +813,23 @@ export async function routes(app: FastifyInstance) {
     if (!id || !input.success)
       return fail(rep, req, 400, "VALIDATION_ERROR", "Check the test result.");
     const d = await db();
-    const result = await d.collection("daily_tests").updateOne(
-      { _id: id, patientId: new ObjectId(u.patientId) },
-      { $set: { ...input.data, measuredAt: new Date(input.data.measuredAt), updatedAt: new Date() } },
-    );
+    const result = await d
+      .collection("daily_tests")
+      .updateOne(
+        { _id: id, patientId: new ObjectId(u.patientId) },
+        {
+          $set: {
+            ...input.data,
+            measuredAt: new Date(input.data.measuredAt),
+            updatedAt: new Date(),
+          },
+        },
+      );
     if (!result.matchedCount)
       return fail(rep, req, 404, "NOT_FOUND", "Test result not found.");
-    return { item: shape(await d.collection("daily_tests").findOne({ _id: id })) };
+    return {
+      item: shape(await d.collection("daily_tests").findOne({ _id: id })),
+    };
   });
   app.delete("/v1/daily-tests/:id", async (req, rep) => {
     const u = await owner(req, rep);
@@ -743,6 +840,343 @@ export async function routes(app: FastifyInstance) {
     await d
       .collection("daily_tests")
       .deleteOne({ _id: id, patientId: new ObjectId(u.patientId) });
+    return { ok: true };
+  });
+  app.get("/v1/projects", async (req, rep) => {
+    const u = await owner(req, rep);
+    if (!u) return;
+    const d = await db();
+    const email = u.email.toLowerCase();
+    const memberships = await d
+      .collection("project_members")
+      .find({ email })
+      .toArray();
+    const ids = memberships.map((m: any) => m.projectId);
+    const projects = await d
+      .collection("projects")
+      .find({ $or: [{ ownerEmail: email }, { _id: { $in: ids } }] })
+      .sort({ updatedAt: -1 })
+      .toArray();
+    const counts = await d
+      .collection("project_sections")
+      .aggregate([
+        { $match: { projectId: { $in: projects.map((p: any) => p._id) } } },
+        {
+          $group: {
+            _id: "$projectId",
+            total: { $sum: 1 },
+            completed: { $sum: { $cond: ["$completed", 1, 0] } },
+          },
+        },
+      ])
+      .toArray();
+    const countById = new Map(counts.map((c: any) => [c._id.toString(), c]));
+    return {
+      items: projects.map((p: any) => {
+        const c = countById.get(p._id.toString()) ?? { total: 0, completed: 0 };
+        return {
+          ...shape(p),
+          role: p.ownerEmail === email ? "owner" : "member",
+          totalSections: c.total,
+          completedSections: c.completed,
+        };
+      }),
+    };
+  });
+  app.post("/v1/projects", async (req, rep) => {
+    const u = await owner(req, rep);
+    if (!u || !assertCsrf(req, rep)) return;
+    const input = projectSchema.safeParse(req.body);
+    if (!input.success)
+      return fail(
+        rep,
+        req,
+        400,
+        "VALIDATION_ERROR",
+        "Check the project details.",
+      );
+    const d = await db(),
+      now = new Date();
+    const result = await d
+      .collection("projects")
+      .insertOne({
+        ...input.data,
+        ownerId: new ObjectId(u.id),
+        ownerEmail: u.email.toLowerCase(),
+        createdAt: now,
+        updatedAt: now,
+      });
+    return rep
+      .code(201)
+      .send({
+        project: shape(
+          await d.collection("projects").findOne({ _id: result.insertedId }),
+        ),
+      });
+  });
+  app.get("/v1/projects/:id", async (req, rep) => {
+    const u = await owner(req, rep);
+    if (!u) return;
+    const id = oid((req.params as any).id);
+    if (!id) return fail(rep, req, 404, "NOT_FOUND", "Project not found.");
+    const d = await db();
+    const access = await projectAccess(d, id, u.email);
+    if (!access) return fail(rep, req, 404, "NOT_FOUND", "Project not found.");
+    const [sections, members] = await Promise.all([
+      d
+        .collection("project_sections")
+        .find({ projectId: id })
+        .sort({ completed: 1, position: 1, createdAt: 1 })
+        .toArray(),
+      d
+        .collection("project_members")
+        .find({ projectId: id })
+        .sort({ createdAt: 1 })
+        .toArray(),
+    ]);
+    const completedSections = sections.filter(
+      (section: any) => section.completed,
+    ).length;
+    const ownerUser = await d
+      .collection("users")
+      .findOne(
+        { _id: access.project.ownerId },
+        { projection: { fullName: 1 } },
+      );
+    return {
+      project: {
+        ...shape(access.project),
+        role: access.role,
+        ownerName: ownerUser?.fullName,
+        totalSections: sections.length,
+        completedSections,
+      },
+      sections: sections.map(shape),
+      members: members.map(shape),
+    };
+  });
+  app.patch("/v1/projects/:id", async (req, rep) => {
+    const u = await owner(req, rep);
+    if (!u || !assertCsrf(req, rep)) return;
+    const id = oid((req.params as any).id);
+    const input = projectSchema.safeParse(req.body);
+    if (!id || !input.success)
+      return fail(
+        rep,
+        req,
+        400,
+        "VALIDATION_ERROR",
+        "Check the project details.",
+      );
+    const d = await db();
+    const access = await projectAccess(d, id, u.email);
+    if (!access || access.role !== "owner")
+      return fail(
+        rep,
+        req,
+        403,
+        "PROJECT_OWNER_REQUIRED",
+        "Only the project owner can update project details.",
+      );
+    await d
+      .collection("projects")
+      .updateOne(
+        { _id: id },
+        { $set: { ...input.data, updatedAt: new Date() } },
+      );
+    return {
+      project: shape(await d.collection("projects").findOne({ _id: id })),
+    };
+  });
+  app.post("/v1/projects/:id/members", async (req, rep) => {
+    const u = await owner(req, rep);
+    if (!u || !assertCsrf(req, rep)) return;
+    const id = oid((req.params as any).id),
+      input = projectMemberSchema.safeParse(req.body);
+    if (!id || !input.success)
+      return fail(
+        rep,
+        req,
+        400,
+        "VALIDATION_ERROR",
+        "Enter a valid user email.",
+      );
+    const d = await db();
+    const access = await projectAccess(d, id, u.email);
+    if (!access || access.role !== "owner")
+      return fail(
+        rep,
+        req,
+        403,
+        "PROJECT_OWNER_REQUIRED",
+        "Only the project owner can add collaborators.",
+      );
+    const email = input.data.email.toLowerCase();
+    if (email === u.email.toLowerCase())
+      return fail(
+        rep,
+        req,
+        400,
+        "VALIDATION_ERROR",
+        "You are already the project owner.",
+      );
+    const invited = await d
+      .collection("users")
+      .findOne({ email, state: "active" });
+    if (!invited)
+      return fail(
+        rep,
+        req,
+        422,
+        "USER_NOT_FOUND",
+        "Ask this person to create a Netrue account first.",
+      );
+    await d
+      .collection("project_members")
+      .updateOne(
+        { projectId: id, email },
+        {
+          $set: {
+            userId: invited._id,
+            email,
+            fullName: invited.fullName,
+            addedBy: new ObjectId(u.id),
+            updatedAt: new Date(),
+          },
+          $setOnInsert: { createdAt: new Date() },
+        },
+        { upsert: true },
+      );
+    await d
+      .collection("projects")
+      .updateOne({ _id: id }, { $set: { updatedAt: new Date() } });
+    return { ok: true };
+  });
+  app.delete("/v1/projects/:id/members/:memberId", async (req, rep) => {
+    const u = await owner(req, rep);
+    if (!u || !assertCsrf(req, rep)) return;
+    const projectId = oid((req.params as any).id),
+      memberId = oid((req.params as any).memberId);
+    if (!projectId || !memberId)
+      return fail(rep, req, 404, "NOT_FOUND", "Collaborator not found.");
+    const d = await db();
+    const access = await projectAccess(d, projectId, u.email);
+    if (!access || access.role !== "owner")
+      return fail(
+        rep,
+        req,
+        403,
+        "PROJECT_OWNER_REQUIRED",
+        "Only the project owner can remove collaborators.",
+      );
+    await d
+      .collection("project_members")
+      .deleteOne({ _id: memberId, projectId });
+    return { ok: true };
+  });
+  app.post("/v1/projects/:id/sections", async (req, rep) => {
+    const u = await owner(req, rep);
+    if (!u || !assertCsrf(req, rep)) return;
+    const projectId = oid((req.params as any).id),
+      input = projectSectionSchema.safeParse(req.body);
+    if (!projectId || !input.success)
+      return fail(
+        rep,
+        req,
+        400,
+        "VALIDATION_ERROR",
+        "Check the section details.",
+      );
+    const d = await db();
+    const access = await projectAccess(d, projectId, u.email);
+    if (!access) return fail(rep, req, 404, "NOT_FOUND", "Project not found.");
+    const last = await d
+      .collection("project_sections")
+      .find({ projectId })
+      .sort({ position: -1 })
+      .limit(1)
+      .next();
+    const result = await d
+      .collection("project_sections")
+      .insertOne({
+        ...input.data,
+        projectId,
+        completed: false,
+        position: (last?.position ?? 0) + 1,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+    await d
+      .collection("projects")
+      .updateOne({ _id: projectId }, { $set: { updatedAt: new Date() } });
+    return rep
+      .code(201)
+      .send({
+        section: shape(
+          await d
+            .collection("project_sections")
+            .findOne({ _id: result.insertedId }),
+        ),
+      });
+  });
+  app.patch("/v1/projects/:id/sections/:sectionId", async (req, rep) => {
+    const u = await owner(req, rep);
+    if (!u || !assertCsrf(req, rep)) return;
+    const projectId = oid((req.params as any).id),
+      sectionId = oid((req.params as any).sectionId),
+      input = projectSectionSchema.safeParse(req.body);
+    if (!projectId || !sectionId || !input.success)
+      return fail(
+        rep,
+        req,
+        400,
+        "VALIDATION_ERROR",
+        "Check the section details.",
+      );
+    const d = await db();
+    const access = await projectAccess(d, projectId, u.email);
+    if (!access) return fail(rep, req, 404, "NOT_FOUND", "Project not found.");
+    const completed = Boolean(input.data.completed);
+    const result = await d
+      .collection("project_sections")
+      .updateOne(
+        { _id: sectionId, projectId },
+        {
+          $set: {
+            ...input.data,
+            completed,
+            completedAt: completed ? new Date() : null,
+            updatedAt: new Date(),
+          },
+        },
+      );
+    if (!result.matchedCount)
+      return fail(rep, req, 404, "NOT_FOUND", "Section not found.");
+    await d
+      .collection("projects")
+      .updateOne({ _id: projectId }, { $set: { updatedAt: new Date() } });
+    return {
+      section: shape(
+        await d.collection("project_sections").findOne({ _id: sectionId }),
+      ),
+    };
+  });
+  app.delete("/v1/projects/:id/sections/:sectionId", async (req, rep) => {
+    const u = await owner(req, rep);
+    if (!u || !assertCsrf(req, rep)) return;
+    const projectId = oid((req.params as any).id),
+      sectionId = oid((req.params as any).sectionId);
+    if (!projectId || !sectionId)
+      return fail(rep, req, 404, "NOT_FOUND", "Section not found.");
+    const d = await db();
+    const access = await projectAccess(d, projectId, u.email);
+    if (!access) return fail(rep, req, 404, "NOT_FOUND", "Project not found.");
+    await d
+      .collection("project_sections")
+      .deleteOne({ _id: sectionId, projectId });
+    await d
+      .collection("projects")
+      .updateOne({ _id: projectId }, { $set: { updatedAt: new Date() } });
     return { ok: true };
   });
   app.get("/v1/push/config", async (req, rep) => {
@@ -1744,7 +2178,15 @@ export async function routes(app: FastifyInstance) {
     if (!file) return fail(rep, req, 404, "NOT_FOUND", "Document not found.");
     await rm(join(config.UPLOAD_DIR, file.storageKey), { force: true });
     await d.collection("files").deleteOne({ _id: id, patientId });
-    await audit({actorId:u.id,patientId:u.patientId,action:"file.delete",resourceType:"file",resourceId:id.toString(),outcome:"success",requestId:req.id});
+    await audit({
+      actorId: u.id,
+      patientId: u.patientId,
+      action: "file.delete",
+      resourceType: "file",
+      resourceId: id.toString(),
+      outcome: "success",
+      requestId: req.id,
+    });
     return { ok: true };
   });
   app.get("/v1/files/:id/content", async (req, rep) => {
